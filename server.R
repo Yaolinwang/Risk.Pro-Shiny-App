@@ -3,8 +3,9 @@ library(OpenMx)
 ## getting data ##
 #end_date=Sys.Date()
 single_data_f <- function(ticker,start_date,end_date){
-  single_data=as.data.frame(getSymbols(ticker,from=start_date,to=end_date,env = NULL))
-  data_adjusted=single_data[,ncol(single_data)]
+  options(download.file.method="libcurl")
+  single_data=as.data.frame(getSymbols(ticker,src='google',from=start_date,to=end_date,env = NULL))
+  data_adjusted=single_data[,ncol(single_data)-1]
   return(diff(log(data_adjusted), lag=1))
 }
 
@@ -69,8 +70,9 @@ port_var_f<-function(position_1,position_2,position_3,position_4,purchase_1,purc
 
 
 retuns_data_f <- function(ticker,start_date,end_date){
-  single_data=as.data.frame(getSymbols(ticker,from=start_date,to=end_date,env = NULL))
-  data_adjusted=single_data[,ncol(single_data)]
+  options(download.file.method="libcurl")
+  single_data=as.data.frame(getSymbols(ticker,src='google',from=start_date,to=end_date,env = NULL))
+  data_adjusted=single_data[,ncol(single_data)-1]
   return(data_adjusted)
 }
 
@@ -87,6 +89,157 @@ data_f_2<-function(symbols,start_date,end_date,purchase_price){
   return_num$pl_4=(return_num[,4]-purchase_price[4])
   return(return_num)
 }
+
+
+
+
+#### Stress testing
+VaR=function(St_buy,r,position){
+  St=St_buy*exp(r)
+  return(abs(round(position*(St-St_buy),digits = 2)))
+}
+
+single_data_f <- function(ticker,start_date,end_date){
+  options(download.file.method="libcurl")
+  single_data=as.data.frame(getSymbols(ticker,src='google',from=start_date,to=end_date,env = NULL))
+  data_adjusted=single_data[,ncol(single_data)-1]
+  return(diff(log(data_adjusted), lag=1))
+}
+
+VaR=function(St_buy,r,position){
+  St=St_buy*exp(r)
+  return(abs(round(position*(St-St_buy),digits = 2)))
+}
+
+indexReturns_data_f <- function(start_date,end_date){
+  URL <- "https://stooq.com/q/d/l/?s=^dji&i=d"
+  dat <- read.csv(URL)
+  dat$Date <- as.Date(dat$Date, "%Y-%m-%d")
+  da <- subset(dat, Date > as.Date(start_date-1) )
+  da_2 <- subset(da, Date < as.Date(end_date+1) )
+  data <- da_2[,ncol(da_2)-1]
+  return(diff(log(data), lag=1))
+}
+
+stress_test=function(symbol_st,St_buy,position,start_date,scenario){
+  end_date=Sys.Date()
+  stockReturns_log=single_data_f(symbol_st,start_date,end_date)
+  indexReturns_log=indexReturns_data_f(start_date,end_date)
+  fit.log <- lm(stockReturns_log ~ indexReturns_log)
+  beta <- fit.log$coefficients[2]
+  
+  ## quarterly return
+  dj_server_adverse=-0.119425509
+  dj_adverse=-0.057476378
+  dj_baseline=0.011846379
+  
+  ## daily return
+  dj_server_adverse_daily=(1+dj_server_adverse)^(1/80)-1
+  dj_adverse_daily=(1+dj_adverse)^(1/80)-1
+  dj_baseline_daily=(1+dj_baseline)^(1/80)-1
+  
+  ## risk free rate
+  rf_server_adverse=0.001
+  rf_adverse=0.001
+  rf_baseline=0.003
+  
+  ## CAPM result
+  return_server_adverse=rf_server_adverse+(beta*(dj_server_adverse_daily-rf_server_adverse))
+  return_adverse=rf_adverse+(beta*(dj_adverse_daily-rf_adverse))
+  return_baseline=rf_baseline+(beta*(dj_baseline_daily-rf_baseline))
+  
+  
+  
+  if(scenario == 'sd' ){
+    v=VaR(St_buy,return_server_adverse,position)
+    return(c(v,dj_server_adverse_daily,rf_server_adverse,beta))
+  }
+  if(scenario == 'a' ){
+    v=VaR(St_buy,return_adverse,position)
+    return(c(v,dj_adverse_daily,rf_adverse,beta))
+  }
+  if(scenario == 'b' ){
+    v=VaR(St_buy,return_baseline,position)
+    return(c(v,dj_baseline_daily,rf_baseline,beta))
+  }
+}
+## DJI plot
+DJI_plot=function(scenario){
+  data_b=c(23551.5,
+           23830.5,
+           24123,
+           24421.8,
+           24726.8,
+           25042.2,
+           25354.2,
+           25667.6,
+           25967.5,
+           26268.6,
+           26570.7,
+           26874.3,
+           27172.8)
+  
+  data_sd=c(15373.6,
+            13537.6,
+            12294.8,
+            11704.3,
+            12337.7,
+            13325.5,
+            14348.1,
+            15625,
+            17069.7,
+            18738.7,
+            19908.7,
+            21185.7,
+            22577.4)
+  
+  data_a=c(15959.6,
+           15042.3,
+           14289.9,
+           13982.2,
+           14367.4,
+           15001,
+           15692.9,
+           16603.2,
+           17519.5,
+           18513.7,
+           19242.6,
+           20025.4,
+           20867)
+  plot(data_a)
+  
+  date_st=c('2017 Q1',
+            '2017 Q2',
+            '2017 Q3',
+            '2017 Q4',
+            '2018 Q1',
+            '2018 Q2',
+            '2018 Q3',
+            '2018 Q4',
+            '2019 Q1',
+            '2019 Q2',
+            '2019 Q3',
+            '2019 Q4',
+            '2020 Q1')
+  if(scenario == 'sd' ){
+    plot(data_sd,xaxt="n",type='o',col='deepskyblue',lwd=3,
+         main='Dow Jones Index in chosen scenario',xlab = 'Date', ylab = 'Dow Jones Index')
+    axis(1,at=1:13,date_st)
+  }
+  if(scenario == 'a' ){
+    plot(data_a,xaxt="n",type='o',col='deepskyblue',lwd=3,
+         main='Dow Jones Index in chosen scenario',xlab = 'Date', ylab = 'Dow Jones Index')
+    axis(1,at=1:13,date_st)
+  }
+  if(scenario == 'b' ){
+    plot(data_b,xaxt="n",type='o',col='deepskyblue',lwd=3,
+         main='Dow Jones Index in chosen scenario',xlab = 'Date', ylab = 'Dow Jones Index')
+    axis(1,at=1:13,date_st)
+  }
+}
+
+
+
 ##############################################
 
 
@@ -100,8 +253,9 @@ function(input, output) {
   })
   
   output$plot2 <- renderPlot({
-    Hisory=as.data.frame(getSymbols(input$symbol,from=input$date,to=input$date_end,env = NULL))
-    chartSeries(Hisory,theme=chartTheme('white'))
+    options(download.file.method="libcurl")
+    History=as.data.frame(getSymbols(input$symbol,src='google',from=input$date,to=input$date_end,env = NULL))
+    chartSeries(History,theme=chartTheme('white'))
   })  
   
   output$plot3 <- renderPlot({
@@ -134,6 +288,20 @@ function(input, output) {
            col=c("deepskyblue", "black"), lty=1:2, cex=0.8,lwd=2,
            box.lty=0)
   })
+  
+  output$plot5 <- renderPlot({
+    end_date=Sys.Date()
+    stockReturns_log=single_data_f(input$symbol_st,input$start_date_st,end_date)
+    indexReturns_log=indexReturns_data_f(input$start_date_st,end_date)
+    fit.log <- lm(stockReturns_log ~ indexReturns_log)
+    plot(indexReturns_log,stockReturns_log,pch = 16, cex = 1, col = "deepskyblue",
+         main='Log Returns',xlab = 'Dow Jones Index ', ylab = paste(input$symbol_st))
+    abline(fit.log,lwd=2)
+  }) 
+  
+  output$plot6 <- renderPlot({
+    DJI_plot(input$scenario_num)
+  })  
 
   ## table_1
   sliderValues_1 <- reactive({
@@ -193,4 +361,31 @@ function(input, output) {
 
   
   ## Stress Testing ###########
+  ## table_3
+  sliderValues_3 <- reactive({
+    
+    # Compose data frame
+    data.frame(
+      Name = c("Symbol", 
+               "Market Return(%)",
+               "Risk Free Rate(%)",
+               "Beta",
+               "Stressed VaR($)"
+      ),
+      
+      Value = as.character(c(input$symbol_st,
+                             round(as.numeric(stress_test(input$symbol_st,input$St_buy_st,input$position_st,input$start_date_st,input$scenario_num)[2])*100,2),
+                             round(as.numeric(stress_test(input$symbol_st,input$St_buy_st,input$position_st,input$start_date_st,input$scenario_num)[3])*100,2),
+                             round(as.numeric(stress_test(input$symbol_st,input$St_buy_st,input$position_st,input$start_date_st,input$scenario_num)[4]),2),
+                             as.numeric(stress_test(input$symbol_st,input$St_buy_st,input$position_st,input$start_date_st,input$scenario_num)[1])
+                             )
+                             
+      ), 
+      stringsAsFactors=FALSE)
+  }) 
+  
+  # Show the values using an HTML table
+  output$values_3 <- renderTable({
+    sliderValues_3()
+  })
 }
